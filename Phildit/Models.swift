@@ -70,15 +70,15 @@ extension Comment: Decodable {
         body = (try? c.decode(String.self, forKey: .body)) ?? ""
         score = (try? c.decode(Int.self, forKey: .score)) ?? 0
         createdUtc = (try? c.decode(Double.self, forKey: .createdUtc)) ?? 0
-        if let listing = try? c.decode(Listing<Comment>.self, forKey: .replies) {
-            replies = listing.data.children.map(\.data)
+        if let listing = try? c.decode(CommentListing.self, forKey: .replies) {
+            replies = listing.data.children.compactMap(\.comment)
         } else {
             replies = []
         }
     }
 }
 
-/// Wrapper that fails to decode "more" stubs so callers can skip them.
+/// A comment listing child: `kind` is a sibling of `data`; "more" stubs yield nil.
 struct CommentNode: Decodable {
     let comment: Comment?
     enum CodingKeys: String, CodingKey { case kind, data }
@@ -87,6 +87,11 @@ struct CommentNode: Decodable {
         let kind = try c.decode(String.self, forKey: .kind)
         comment = kind == "t1" ? try c.decode(Comment.self, forKey: .data) : nil
     }
+}
+
+struct CommentListing: Decodable {
+    struct Data: Decodable { let children: [CommentNode] }
+    let data: Data
 }
 
 enum SortMode: String, CaseIterable, Identifiable {

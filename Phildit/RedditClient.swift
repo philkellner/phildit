@@ -46,16 +46,16 @@ struct RedditClient {
         let parts = try await fetch("/comments/\(postID).json", query: [.init(name: "limit", value: "200")], as: [ThreadPart].self)
         guard parts.count == 2, case .posts(let l) = parts[0], case .comments(let c) = parts[1],
               let post = l.data.children.first?.data else { throw URLError(.cannotParseResponse) }
-        return (post, c.data.children.compactMap { $0.data.comment })
+        return (post, c.data.children.compactMap(\.comment))
     }
 }
 
 /// /comments returns a 2-element array: [post listing, comment listing].
 private enum ThreadPart: Decodable {
     case posts(Listing<Post>)
-    case comments(Listing<CommentNode>)
+    case comments(CommentListing)
     init(from decoder: Decoder) throws {
         if let p = try? Listing<Post>(from: decoder) { self = .posts(p) }
-        else { self = .comments(try Listing<CommentNode>(from: decoder)) }
+        else { self = .comments(try CommentListing(from: decoder)) }
     }
 }

@@ -12,8 +12,8 @@ final class DecodingTests: XCTestCase {
               {"kind":"more","data":{"id":"m","count":5}}]}}}},
           {"kind":"more","data":{"id":"m2","count":9}}]}}
         """.data(using: .utf8)!
-        let l = try JSONDecoder().decode(Listing<CommentNode>.self, from: json)
-        let cs = l.data.children.compactMap { $0.data.comment }
+        let l = try JSONDecoder().decode(CommentListing.self, from: json)
+        let cs = l.data.children.compactMap(\.comment)
         XCTAssertEqual(cs.map(\.id), ["a", "b"])
         XCTAssertEqual(cs[1].replies.map(\.id), ["c"])
     }
