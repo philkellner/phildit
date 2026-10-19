@@ -1,8 +1,12 @@
 import SwiftUI
+import AuthenticationServices
 
 struct RootView: View {
     @StateObject private var vm = FeedViewModel()
+    @ObservedObject private var auth = AuthManager.shared
     @State private var subField = ""
+    @State private var showAccount = false
+    @State private var showSubs = false
 
     var body: some View {
         NavigationStack {
@@ -20,7 +24,7 @@ struct RootView: View {
                 }
             }
             .listStyle(.plain)
-            .navigationTitle(vm.searchQuery.isEmpty ? "r/\(vm.subreddit)" : "Search")
+            .navigationTitle(vm.searchQuery.isEmpty ? (vm.subreddit.isEmpty ? "Home" : "r/\(vm.subreddit)") : "Search")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Post.self) { ThreadView(post: $0) }
             .refreshable { await vm.reload() }
@@ -38,6 +42,17 @@ struct RootView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showAccount = true } label: {
+                        Image(systemName: auth.isLoggedIn ? "person.crop.circle.fill" : "person.crop.circle")
+                    }
+                }
+                if auth.isLoggedIn {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button { Task { await vm.openHome() } } label: { Image(systemName: "house") }
+                        Button { showSubs = true } label: { Image(systemName: "list.bullet") }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Picker("Sort", selection: $vm.sort) {
                         ForEach(SortMode.allCases) { Text($0.rawValue.capitalized).tag($0) }
@@ -47,7 +62,98 @@ struct RootView: View {
                 }
             }
         }
-        .task { await vm.reload() }
+        .sheet(isPresented: $showAccount) {
+            AccountView { Task { await vm.openHome() } }
+        }
+        .sheet(isPresented: $showSubs) {
+            SubscriptionsView { name in
+                showSubs = false
+                Task { await vm.open(subreddit: name) }
+            }
+        }
+        .task {
+            if auth.isLoggedIn { vm.subreddit = "" }
+            await vm.reload()
+        }
+    }
+}
+
+struct AccountView: View {
+    var onLogin: () -> Void
+    @ObservedObject private var auth = AuthManager.shared
+    @Environment(\.webAuthenticationSession) private var webAuth
+    @Environment(\.dismiss) private var dismiss
+    @State private var error: String?
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if auth.isLoggedIn {
+                    Section("Signed in") {
+                        Text(auth.username.map { "u/\($0)" } ?? "Reddit account")
+                        Button("Log out", role: .destructive) { auth.logout(); dismiss() }
+                    }
+                } else {
+                    Section {
+                        TextField("Reddit client ID", text: $auth.clientID)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button { Task { await login() } } label: {
+                            if busy { ProgressView() } else { Text("Log in with Reddit") }
+                        }.disabled(busy)
+                    } header: { Text("Log in") } footer: {
+                        Text("Create an \"installed app\" at reddit.com/prefs/apps with redirect URI \(AuthManager.redirectURI), then paste its client ID here. Your password is only ever entered on reddit.com.")
+                    }
+                }
+                if let error { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+
+    private func login() async {
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            let url = try await webAuth.authenticate(using: auth.authorizeURL(), callbackURLScheme: AuthManager.callbackScheme)
+            try await auth.handleCallback(url)
+            dismiss()
+            onLogin()
+        } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
+            // User closed the sheet; nothing to report.
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct SubscriptionsView: View {
+    var onSelect: (String) -> Void
+    @State private var names: [String] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var filter = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if loading { ProgressView().frame(maxWidth: .infinity) }
+                if let error { Text(error).foregroundStyle(.red) }
+                ForEach(names.filter { filter.isEmpty || $0.localizedCaseInsensitiveContains(filter) }, id: \.self) { n in
+                    Button("r/\(n)") { onSelect(n) }
+                }
+            }
+            .searchable(text: $filter, prompt: "Filter")
+            .navigationTitle("My subreddits")
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                do { names = try await RedditClient().subscriptions() }
+                catch { self.error = error.localizedDescription }
+                loading = false
+            }
+        }
     }
 }
 

@@ -35,6 +35,12 @@ final class FeedViewModel: ObservableObject {
         }
     }
 
+    func openHome() async {
+        subreddit = ""
+        searchQuery = ""
+        await reload()
+    }
+
     func open(subreddit name: String) async {
         subreddit = name.replacingOccurrences(of: "r/", with: "").trimmingCharacters(in: .whitespaces)
         searchQuery = ""

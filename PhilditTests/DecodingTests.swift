@@ -18,3 +18,19 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(cs[1].replies.map(\.id), ["c"])
     }
 }
+
+final class AuthDecodingTests: XCTestCase {
+    func testTokenResponse() throws {
+        let json = #"{"access_token":"a","token_type":"bearer","expires_in":86400,"refresh_token":"r","scope":"read"}"#.data(using: .utf8)!
+        let t = try JSONDecoder().decode(TokenResponse.self, from: json)
+        XCTAssertEqual(t.accessToken, "a")
+        XCTAssertEqual(t.refreshToken, "r")
+        XCTAssertEqual(t.expiresIn, 86400)
+    }
+
+    func testSubscriptionListing() throws {
+        let json = #"{"kind":"Listing","data":{"after":null,"children":[{"kind":"t5","data":{"display_name":"swift"}}]}}"#.data(using: .utf8)!
+        let l = try JSONDecoder().decode(Listing<Subreddit>.self, from: json)
+        XCTAssertEqual(l.data.children.map(\.data.displayName), ["swift"])
+    }
+}

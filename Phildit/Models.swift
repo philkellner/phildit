@@ -98,3 +98,8 @@ enum SortMode: String, CaseIterable, Identifiable {
     case hot, new, top, rising
     var id: String { rawValue }
 }
+
+struct Subreddit: Decodable {
+    let displayName: String
+    enum CodingKeys: String, CodingKey { case displayName = "display_name" }
+}

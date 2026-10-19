@@ -13,13 +13,17 @@ struct RedditClient {
 
     var session: URLSession = .shared
     // Reddit rejects generic user agents; identify the app.
-    private let userAgent = "ios:com.philkellner.phildit:v1.0 (personal reader)"
+    static let userAgent = "ios:com.philkellner.phildit:v1.0 (personal reader)"
 
     private func fetch<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type) async throws -> T {
-        var comps = URLComponents(string: "https://www.reddit.com" + path)!
+        // Logged in: authenticated API host with a bearer token; otherwise the public site.
+        let token = try await AuthManager.shared.validToken()
+        let host = token == nil ? "https://www.reddit.com" : "https://oauth.reddit.com"
+        var comps = URLComponents(string: host + path)!
         comps.queryItems = query + [URLQueryItem(name: "raw_json", value: "1")]
         var req = URLRequest(url: comps.url!)
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (data, resp) = try await session.data(for: req)
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw RedditError.http(http.statusCode)
@@ -31,8 +35,29 @@ struct RedditClient {
         var q = [URLQueryItem(name: "limit", value: "25")]
         if sort == .top { q.append(.init(name: "t", value: timeRange)) }
         if let after { q.append(.init(name: "after", value: after)) }
-        let l = try await fetch("/r/\(subreddit)/\(sort.rawValue).json", query: q, as: Listing<Post>.self)
+        // An empty subreddit means the logged-in home feed ("best" is Reddit's name for hot).
+        let path = subreddit.isEmpty
+            ? "/\(sort == .hot ? "best" : sort.rawValue).json"
+            : "/r/\(subreddit)/\(sort.rawValue).json"
+        let l = try await fetch(path, query: q, as: Listing<Post>.self)
         return (l.data.children.map(\.data), l.data.after)
+    }
+
+    func me() async throws -> String {
+        struct Me: Decodable { let name: String }
+        return try await fetch("/api/v1/me", as: Me.self).name
+    }
+
+    func subscriptions() async throws -> [String] {
+        var names: [String] = [], after: String?
+        repeat {
+            var q = [URLQueryItem(name: "limit", value: "100")]
+            if let after { q.append(.init(name: "after", value: after)) }
+            let l = try await fetch("/subreddits/mine/subscriber", query: q, as: Listing<Subreddit>.self)
+            names += l.data.children.map(\.data.displayName)
+            after = l.data.after
+        } while after != nil && names.count < 1000
+        return names.sorted { $0.lowercased() < $1.lowercased() }
     }
 
     func search(_ query: String, after: String? = nil) async throws -> (posts: [Post], after: String?) {
